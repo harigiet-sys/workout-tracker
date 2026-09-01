@@ -1,65 +1,90 @@
 const express = require('express');
-const fs = require('fs');
 const path = require('path');
+const { createClient } = require('@libsql/client');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const DB_FILE = path.join(__dirname, 'data', 'entries.json');
 
-// Ensure data dir + file exist
-fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
-if (!fs.existsSync(DB_FILE)) fs.writeFileSync(DB_FILE, '[]');
-
-function readEntries() {
-  try {
-    return JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-  } catch (e) {
-    return [];
-  }
+if (!process.env.TURSO_DATABASE_URL || !process.env.TURSO_AUTH_TOKEN) {
+  console.error('Missing TURSO_DATABASE_URL or TURSO_AUTH_TOKEN environment variables.');
 }
 
-function writeEntries(entries) {
-  // Write to a temp file then rename — avoids a corrupted file if the process dies mid-write
-  const tmp = DB_FILE + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(entries, null, 2));
-  fs.renameSync(tmp, DB_FILE);
+const db = createClient({
+  url: process.env.TURSO_DATABASE_URL,
+  authToken: process.env.TURSO_AUTH_TOKEN
+});
+
+async function init() {
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS entries (
+      id TEXT PRIMARY KEY,
+      date TEXT NOT NULL,
+      bodypart TEXT NOT NULL,
+      exercise TEXT NOT NULL,
+      sets TEXT NOT NULL,
+      notes TEXT
+    )
+  `);
 }
+init().catch(err => console.error('DB init failed:', err));
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-app.get('/api/entries', (req, res) => {
-  res.json(readEntries().sort((a, b) => a.date.localeCompare(b.date)));
-});
-
-app.post('/api/entries', (req, res) => {
-  const { id, date, bodypart, exercise, sets, notes } = req.body;
-  if (!id || !date || !bodypart || !exercise || !sets) {
-    return res.status(400).json({ error: 'Missing required fields' });
+app.get('/api/entries', async (req, res) => {
+  try {
+    const result = await db.execute('SELECT * FROM entries ORDER BY date ASC');
+    const rows = result.rows.map(r => ({
+      id: r.id, date: r.date, bodypart: r.bodypart, exercise: r.exercise,
+      sets: JSON.parse(r.sets), notes: r.notes || ''
+    }));
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'DB read failed' });
   }
-  const entries = readEntries();
-  if (entries.some(e => e.id === id)) {
-    return res.status(409).json({ error: 'Entry with this id already exists' });
+});
+
+app.post('/api/entries', async (req, res) => {
+  try {
+    const { id, date, bodypart, exercise, sets, notes } = req.body;
+    if (!id || !date || !bodypart || !exercise || !sets) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+    await db.execute({
+      sql: 'INSERT INTO entries (id, date, bodypart, exercise, sets, notes) VALUES (?, ?, ?, ?, ?, ?)',
+      args: [id, date, bodypart, exercise, JSON.stringify(sets), notes || '']
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'DB write failed' });
   }
-  entries.push({ id, date, bodypart, exercise, sets, notes: notes || '' });
-  writeEntries(entries);
-  res.json({ ok: true });
 });
 
-app.put('/api/entries/:id', (req, res) => {
-  const { date, bodypart, exercise, sets, notes } = req.body;
-  const entries = readEntries();
-  const idx = entries.findIndex(e => e.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'Not found' });
-  entries[idx] = { id: req.params.id, date, bodypart, exercise, sets, notes: notes || '' };
-  writeEntries(entries);
-  res.json({ ok: true });
+app.put('/api/entries/:id', async (req, res) => {
+  try {
+    const { date, bodypart, exercise, sets, notes } = req.body;
+    const result = await db.execute({
+      sql: 'UPDATE entries SET date=?, bodypart=?, exercise=?, sets=?, notes=? WHERE id=?',
+      args: [date, bodypart, exercise, JSON.stringify(sets), notes || '', req.params.id]
+    });
+    if (result.rowsAffected === 0) return res.status(404).json({ error: 'Not found' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'DB update failed' });
+  }
 });
 
-app.delete('/api/entries/:id', (req, res) => {
-  const entries = readEntries().filter(e => e.id !== req.params.id);
-  writeEntries(entries);
-  res.json({ ok: true });
+app.delete('/api/entries/:id', async (req, res) => {
+  try {
+    await db.execute({ sql: 'DELETE FROM entries WHERE id=?', args: [req.params.id] });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'DB delete failed' });
+  }
 });
 
 app.listen(PORT, () => console.log(`Workout tracker running on port ${PORT}`));

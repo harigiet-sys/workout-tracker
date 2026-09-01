@@ -24,6 +24,10 @@
   textarea { resize:vertical; min-height:50px; }
   button.primary { width:100%; padding:13px; background:#1D9E75; color:#fff; border:none; border-radius:8px; font-size:15px; font-weight:600; margin-top:14px; }
   button.secondary { width:100%; padding:11px; background:transparent; color:#1D9E75; border:1px solid #1D9E75; border-radius:8px; font-size:14px; font-weight:600; margin-top:8px; }
+  .exercise-hint { font-size:11px; color:#888780; margin-top:4px; }
+  .set-type-toggle { display:flex; gap:6px; margin-bottom:8px; }
+  .set-type-toggle button { flex:1; padding:8px; font-size:12px; border:1px solid #D3D1C7; background:#FAFAF7; border-radius:8px; color:#5F5E5A; }
+  .set-type-toggle button.active { background:#1D9E75; color:#fff; border-color:#1D9E75; }
   .set-row { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
   .set-row .set-num { font-size:12px; color:#888780; width:18px; flex-shrink:0; }
   .set-row input { flex:1; }
@@ -56,7 +60,7 @@
 
 <header>
   <h1>Workout tracker</h1>
-  <p>Log sets, track progress, export a PDF report</p>
+  <p>Push-Pull-Legs x2 · Log sets, track progress, export PDF</p>
 </header>
 
 <div class="tabs">
@@ -70,15 +74,22 @@
   <div class="card">
     <label>Date</label>
     <input type="date" id="f-date">
-    <label>Body part</label>
+    <label>Body part / day</label>
     <select id="f-bodypart"></select>
     <label>Exercise</label>
     <select id="f-exercise-select"></select>
     <input type="text" id="f-exercise-custom" placeholder="Type exercise name" style="display:none;margin-top:8px;">
+    <div class="exercise-hint" id="exercise-hint"></div>
     <div class="lastcard" id="lastcard" style="display:none;"></div>
+
     <label>Sets</label>
+    <div class="set-type-toggle">
+      <button type="button" id="type-repweight" class="active">Reps + Weight</button>
+      <button type="button" id="type-duration">Duration (time)</button>
+    </div>
     <div id="sets-list"></div>
     <button class="secondary" type="button" id="btn-add-set">+ Add set</button>
+
     <label>Notes</label>
     <textarea id="f-notes" placeholder="How it felt, form cues, etc."></textarea>
     <button class="primary" id="btn-add">Add entry</button>
@@ -111,20 +122,67 @@
 <script>
 let entries = [];
 let editingId = null;
+let currentSetType = 'repweight'; // 'repweight' | 'duration'
+
+// Exact plan from Harish's Physique-Building Plan PDF
 const EXERCISE_PLAN = {
-  Push: ['Bench press','Overhead press','Incline dumbbell press','Chest fly','Tricep pushdown','Lateral raise','Dips'],
-  Pull: ['Deadlift','Pull-up','Barbell row','Lat pulldown','Seated cable row','Bicep curl','Face pull'],
-  Legs: ['Squat','Leg press','Romanian deadlift','Leg extension','Leg curl','Calf raise','Lunges'],
-  Cardio: ['Running','Cycling','Rowing','Stair climber','Jump rope'],
-  Other: []
+  Push: {
+    label: 'Push (Chest, Shoulders, Triceps)',
+    exercises: [
+      { name: 'Barbell/Smith Bench Press', hint: '4 x 6-8' },
+      { name: 'Incline Dumbbell Press', hint: '3 x 10' },
+      { name: 'Seated Shoulder Press', hint: '3 x 10' },
+      { name: 'Lateral Raises', hint: '4 x 15' },
+      { name: 'Cable Flys', hint: '3 x 12' },
+      { name: 'Tricep Dips or Pushdowns', hint: '3 x 12' },
+      { name: 'Overhead Tricep Extension', hint: '2 x 15' }
+    ]
+  },
+  Pull: {
+    label: 'Pull (Back, Biceps)',
+    exercises: [
+      { name: 'Pull-ups or Lat Pulldown', hint: '4 x 8-10' },
+      { name: 'Barbell/Dumbbell Row', hint: '4 x 10' },
+      { name: 'Seated Cable Row', hint: '3 x 12' },
+      { name: 'Face Pulls', hint: '3 x 15' },
+      { name: 'Barbell Curl', hint: '3 x 10' },
+      { name: 'Hammer Curl', hint: '3 x 12' }
+    ]
+  },
+  Legs: {
+    label: 'Legs + Core',
+    exercises: [
+      { name: 'Squats', hint: '4 x 8' },
+      { name: 'Romanian Deadlift', hint: '3 x 10' },
+      { name: 'Leg Press', hint: '3 x 12' },
+      { name: 'Walking Lunges', hint: '3 x 12/side' },
+      { name: 'Calf Raises', hint: '4 x 15' },
+      { name: 'Hanging Leg Raises', hint: '3 x 15' },
+      { name: 'Cable Crunch', hint: '3 x 15' },
+      { name: 'Plank', hint: '3 x 45 sec', defaultType: 'duration' }
+    ]
+  },
+  Cardio: {
+    label: 'Cardio (non-leg days)',
+    exercises: [
+      { name: 'Cycling', hint: '20 min easy', defaultType: 'duration' },
+      { name: 'Running', hint: '20 min easy', defaultType: 'duration' },
+      { name: 'Rowing', hint: '20 min easy', defaultType: 'duration' },
+      { name: 'Jump Rope', hint: '', defaultType: 'duration' }
+    ]
+  },
+  Rest: {
+    label: 'Rest / Stretching / Walking',
+    exercises: [
+      { name: 'Light Stretching', hint: '', defaultType: 'duration' },
+      { name: 'Walking', hint: '', defaultType: 'duration' }
+    ]
+  }
 };
 const COLORS = ['#1D9E75','#378ADD','#D85A30','#D4537E','#7F77DD','#BA7517'];
 
 async function api(path, opts) {
-  const res = await fetch('/api' + path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...opts
-  });
+  const res = await fetch('/api' + path, { headers: { 'Content-Type': 'application/json' }, ...opts });
   if (!res.ok) throw new Error('API error');
   return res.json();
 }
@@ -148,31 +206,54 @@ document.querySelectorAll('.tab').forEach(tab => {
 
 function populateBodypartSelect() {
   const sel = document.getElementById('f-bodypart');
-  sel.innerHTML = Object.keys(EXERCISE_PLAN).map(bp => `<option value="${bp}">${bp}</option>`).join('');
+  sel.innerHTML = Object.keys(EXERCISE_PLAN).map(bp => `<option value="${bp}">${EXERCISE_PLAN[bp].label}</option>`).join('');
   sel.onchange = () => { populateExerciseDropdown(); updateLastCard(); };
 }
+
+function findExerciseMeta(bp, name) {
+  const list = (EXERCISE_PLAN[bp] || {}).exercises || [];
+  return list.find(e => e.name === name);
+}
+
 function populateExerciseDropdown(preselect) {
   const bp = document.getElementById('f-bodypart').value;
-  const list = EXERCISE_PLAN[bp] || [];
+  const list = (EXERCISE_PLAN[bp] || {}).exercises || [];
   const sel = document.getElementById('f-exercise-select');
   const custom = document.getElementById('f-exercise-custom');
-  sel.innerHTML = list.map(ex => `<option value="${ex}">${ex}</option>`).join('') + '<option value="__custom__">Other / custom exercise</option>';
+  sel.innerHTML = list.map(ex => `<option value="${ex.name}">${ex.name}</option>`).join('') + '<option value="__custom__">Other / custom exercise</option>';
   sel.onchange = () => {
     if (sel.value === '__custom__') { custom.style.display='block'; custom.value=''; custom.focus(); }
     else custom.style.display='none';
-    updateLastCard();
+    updateExerciseHint(); updateLastCard();
   };
   if (preselect) {
-    if (list.includes(preselect)) { sel.value = preselect; custom.style.display='none'; }
+    if (list.some(e => e.name === preselect)) { sel.value = preselect; custom.style.display='none'; }
     else { sel.value = '__custom__'; custom.style.display='block'; custom.value = preselect; }
   } else custom.style.display='none';
+  updateExerciseHint();
   updateLastCard();
 }
+
+function updateExerciseHint() {
+  const bp = document.getElementById('f-bodypart').value;
+  const sel = document.getElementById('f-exercise-select').value;
+  const hintEl = document.getElementById('exercise-hint');
+  const meta = findExerciseMeta(bp, sel);
+  hintEl.textContent = meta && meta.hint ? 'Plan target: ' + meta.hint : '';
+  // Auto-switch set type for known duration exercises (only when not editing)
+  if (!editingId && meta && meta.defaultType === 'duration' && currentSetType !== 'duration') {
+    setSetType('duration');
+  } else if (!editingId && meta && !meta.defaultType && currentSetType !== 'repweight') {
+    setSetType('repweight');
+  }
+}
+
 function currentExerciseName() {
   const sel = document.getElementById('f-exercise-select').value;
   const custom = document.getElementById('f-exercise-custom').value.trim();
   return sel === '__custom__' ? custom : sel;
 }
+
 function updateLastCard() {
   const card = document.getElementById('lastcard');
   const ex = currentExerciseName();
@@ -180,15 +261,35 @@ function updateLastCard() {
   const prior = entries.filter(e => e.exercise === ex && e.id !== editingId).sort((a,b) => b.date.localeCompare(a.date));
   if (prior.length === 0) { card.style.display='none'; return; }
   const last = prior[0];
-  const setsStr = (last.sets||[]).map((s,i) => `S${i+1}: ${s.reps||'-'}×${s.weight||'-'}kg`).join('  ');
+  const setsStr = (last.sets||[]).map((s,i) => formatSet(s, i)).join('  ');
   card.innerHTML = `<div class="lastcard-title">Last time (${last.date})</div>${escapeHtml(setsStr)}`;
   card.style.display = 'block';
 }
-function addSetRow(reps, weight) {
+
+function formatSet(s, i) {
+  if (s.type === 'duration') return `S${i+1}: ${s.duration||'-'}`;
+  return `S${i+1}: ${s.reps||'-'}×${s.weight||'-'}kg`;
+}
+
+function setSetType(type) {
+  currentSetType = type;
+  document.getElementById('type-repweight').classList.toggle('active', type === 'repweight');
+  document.getElementById('type-duration').classList.toggle('active', type === 'duration');
+  document.getElementById('sets-list').innerHTML = '';
+  addSetRow();
+}
+document.getElementById('type-repweight').addEventListener('click', () => setSetType('repweight'));
+document.getElementById('type-duration').addEventListener('click', () => setSetType('duration'));
+
+function addSetRow(existing) {
   const wrap = document.getElementById('sets-list');
   const row = document.createElement('div');
   row.className = 'set-row';
-  row.innerHTML = `<span class="set-num"></span><input type="number" class="set-reps" min="1" placeholder="Reps" value="${reps??''}"><input type="number" class="set-weight" min="0" step="0.5" placeholder="Weight (kg)" value="${weight??''}"><button type="button" class="set-del">&times;</button>`;
+  if (currentSetType === 'duration') {
+    row.innerHTML = `<span class="set-num"></span><input type="text" class="set-duration" placeholder="e.g. 45 sec or 20 min" value="${existing && existing.duration ? existing.duration : ''}"><button type="button" class="set-del">&times;</button>`;
+  } else {
+    row.innerHTML = `<span class="set-num"></span><input type="number" class="set-reps" min="1" placeholder="Reps" value="${existing && existing.reps!=null ? existing.reps : ''}"><input type="number" class="set-weight" min="0" step="0.5" placeholder="Weight (kg)" value="${existing && existing.weight!=null ? existing.weight : ''}"><button type="button" class="set-del">&times;</button>`;
+  }
   wrap.appendChild(row);
   row.querySelector('.set-del').addEventListener('click', () => { row.remove(); renumberSets(); });
   renumberSets();
@@ -211,6 +312,9 @@ function applyLastEntryDefaults() {
 function resetForm() {
   editingId = null;
   document.getElementById('f-notes').value = '';
+  currentSetType = 'repweight';
+  document.getElementById('type-repweight').classList.add('active');
+  document.getElementById('type-duration').classList.remove('active');
   document.getElementById('sets-list').innerHTML = '';
   addSetRow();
   document.getElementById('btn-add').textContent = 'Add entry';
@@ -227,8 +331,12 @@ function startEdit(id) {
   document.getElementById('f-bodypart').value = e.bodypart;
   populateExerciseDropdown(e.exercise);
   document.getElementById('f-notes').value = e.notes || '';
+  const firstType = (e.sets && e.sets[0] && e.sets[0].type === 'duration') ? 'duration' : 'repweight';
+  currentSetType = firstType;
+  document.getElementById('type-repweight').classList.toggle('active', firstType==='repweight');
+  document.getElementById('type-duration').classList.toggle('active', firstType==='duration');
   document.getElementById('sets-list').innerHTML = '';
-  (e.sets||[]).forEach(s => addSetRow(s.reps, s.weight));
+  (e.sets||[]).forEach(s => addSetRow(s));
   if ((e.sets||[]).length===0) addSetRow();
   document.getElementById('btn-add').textContent = 'Update entry';
   document.getElementById('btn-cancel-edit').style.display = 'block';
@@ -246,9 +354,14 @@ document.getElementById('btn-add').addEventListener('click', async () => {
   const statusEl = document.getElementById('add-status');
   const sets = [];
   document.querySelectorAll('#sets-list .set-row').forEach(row => {
-    const reps = row.querySelector('.set-reps').value;
-    const weight = row.querySelector('.set-weight').value;
-    if (reps || weight) sets.push({ reps: reps?Number(reps):null, weight: weight?Number(weight):null });
+    if (currentSetType === 'duration') {
+      const duration = row.querySelector('.set-duration').value.trim();
+      if (duration) sets.push({ type: 'duration', duration });
+    } else {
+      const reps = row.querySelector('.set-reps').value;
+      const weight = row.querySelector('.set-weight').value;
+      if (reps || weight) sets.push({ type: 'repweight', reps: reps?Number(reps):null, weight: weight?Number(weight):null });
+    }
   });
   if (!date || !exercise) { statusEl.style.color='#D85A30'; statusEl.textContent='Enter a date and exercise name.'; return; }
   if (sets.length === 0) { statusEl.style.color='#D85A30'; statusEl.textContent='Add at least one set.'; return; }
@@ -295,7 +408,7 @@ function renderHistory() {
   dates.forEach(date => {
     html += `<div class="card day-group"><div class="day-title">${date}</div>`;
     byDate[date].forEach(e => {
-      const setsStr = (e.sets||[]).map((s,i) => `S${i+1}: ${s.reps||'-'}×${s.weight||'-'}kg`).join('  ');
+      const setsStr = (e.sets||[]).map((s,i) => formatSet(s,i)).join('  ');
       html += `<div class="entry"><div class="entry-top"><div><div class="entry-name">${escapeHtml(e.exercise)}</div><div class="entry-meta">${e.bodypart} · ${(e.sets||[]).length} sets</div><div class="entry-meta">${escapeHtml(setsStr)}</div></div><div class="entry-actions"><button class="edit-btn" data-id="${e.id}">Edit</button><button class="del-btn" data-id="${e.id}">Delete</button></div></div>${e.notes ? `<div class="entry-meta" style="margin-top:4px;">${escapeHtml(e.notes)}</div>` : ''}</div>`;
     });
     html += '</div>';
@@ -316,28 +429,31 @@ function renderProgressTiles() {
   tileCharts = [];
   const container = document.getElementById('progress-tiles');
   if (entries.length === 0) { container.innerHTML = '<div class="empty">No workouts logged yet.</div>'; return; }
+  // Only weight-based exercises get bar-chart tiles; duration-based get a simple session count/list note
   const byBodypart = {};
   entries.forEach(e => {
-    if (!(e.sets||[]).some(s => s.weight)) return;
+    const weightSets = (e.sets||[]).filter(s => s.type !== 'duration' && s.weight);
+    if (weightSets.length === 0) return;
     (byBodypart[e.bodypart] = byBodypart[e.bodypart] || {});
     (byBodypart[e.bodypart][e.exercise] = byBodypart[e.bodypart][e.exercise] || []).push(e);
   });
   let html = '';
   const groupOrder = Object.keys(EXERCISE_PLAN).filter(bp => byBodypart[bp]);
   groupOrder.forEach(bp => {
-    html += `<div class="group-title">${bp}</div><div class="tile-grid">`;
+    html += `<div class="group-title">${EXERCISE_PLAN[bp].label}</div><div class="tile-grid">`;
     Object.keys(byBodypart[bp]).forEach((ex, i) => {
       const tileId = 'tile-' + bp.replace(/\s/g,'') + '-' + i;
       html += `<div class="tile"><div class="tile-name">${escapeHtml(ex)}</div><canvas id="${tileId}" height="90"></canvas><div class="tile-stats" id="${tileId}-stats"></div></div>`;
     });
     html += '</div>';
   });
+  if (!html) html = '<div class="empty">Log some weighted sets to see progress tiles. Duration-based exercises (plank, cardio) show in History instead.</div>';
   container.innerHTML = html;
   let colorIdx = 0;
   groupOrder.forEach(bp => {
     Object.keys(byBodypart[bp]).forEach((ex, i) => {
       const tileId = 'tile-' + bp.replace(/\s/g,'') + '-' + i;
-      const data = byBodypart[bp][ex].map(e => ({date: e.date, maxWeight: Math.max(...e.sets.map(s => s.weight||0))})).sort((a,b) => a.date.localeCompare(b.date));
+      const data = byBodypart[bp][ex].map(e => ({date: e.date, maxWeight: Math.max(...e.sets.filter(s=>s.type!=='duration').map(s => s.weight||0))})).sort((a,b) => a.date.localeCompare(b.date));
       const color = COLORS[colorIdx % COLORS.length]; colorIdx++;
       const ctx = document.getElementById(tileId).getContext('2d');
       const chart = new Chart(ctx, { type:'bar', data:{ labels: data.map(d=>d.date.slice(5)), datasets:[{ data: data.map(d=>d.maxWeight), backgroundColor: color, borderRadius: 3 }] }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{x:{ticks:{font:{size:9}}}, y:{display:false, beginAtZero:true}} } });
@@ -378,18 +494,20 @@ document.getElementById('btn-pdf').addEventListener('click', async () => {
     doc.setFontSize(10); const split = doc.splitTextToSize(notes, 180); doc.text(split, 14, y); y += split.length * 5 + 6;
   }
 
-  const freq = {}; filtered.forEach(e => freq[e.exercise] = (freq[e.exercise]||0)+1);
-  const topExercise = Object.keys(freq).sort((a,b) => freq[b]-freq[a])[0];
-  const topData = filtered.filter(e => e.exercise === topExercise && (e.sets||[]).some(s => s.weight)).map(e => ({date: e.date, maxWeight: Math.max(...e.sets.map(s => s.weight||0))}));
-
-  if (topData.length > 1) {
-    const canvas = document.createElement('canvas'); canvas.width = 500; canvas.height = 250;
-    const tmpChart = new Chart(canvas.getContext('2d'), { type:'bar', data:{ labels: topData.map(e=>e.date), datasets:[{ label: topExercise, data: topData.map(e=>e.maxWeight), backgroundColor:'#1D9E75' }] }, options:{ responsive:false, animation:false, plugins:{legend:{display:true}} } });
-    await new Promise(r => setTimeout(r, 300));
-    const imgData = canvas.toDataURL('image/png');
-    doc.setFontSize(12); doc.text(`Progress: ${topExercise}`, 14, y); y += 5;
-    doc.addImage(imgData, 'PNG', 14, y, 180, 90); y += 96;
-    tmpChart.destroy();
+  const freqW = {};
+  filtered.forEach(e => { if ((e.sets||[]).some(s=>s.type!=='duration' && s.weight)) freqW[e.exercise] = (freqW[e.exercise]||0)+1; });
+  const topExercise = Object.keys(freqW).sort((a,b) => freqW[b]-freqW[a])[0];
+  if (topExercise) {
+    const topData = filtered.filter(e => e.exercise === topExercise).map(e => ({date: e.date, maxWeight: Math.max(...e.sets.filter(s=>s.type!=='duration').map(s => s.weight||0))}));
+    if (topData.length > 1) {
+      const canvas = document.createElement('canvas'); canvas.width = 500; canvas.height = 250;
+      const tmpChart = new Chart(canvas.getContext('2d'), { type:'bar', data:{ labels: topData.map(e=>e.date), datasets:[{ label: topExercise, data: topData.map(e=>e.maxWeight), backgroundColor:'#1D9E75' }] }, options:{ responsive:false, animation:false, plugins:{legend:{display:true}} } });
+      await new Promise(r => setTimeout(r, 300));
+      const imgData = canvas.toDataURL('image/png');
+      doc.setFontSize(12); doc.text(`Progress: ${topExercise}`, 14, y); y += 5;
+      doc.addImage(imgData, 'PNG', 14, y, 180, 90); y += 96;
+      tmpChart.destroy();
+    }
   }
 
   if (y > 260) { doc.addPage(); y = 18; }
@@ -402,7 +520,7 @@ document.getElementById('btn-pdf').addEventListener('click', async () => {
     byDate[date].forEach(e => {
       if (y > 280) { doc.addPage(); y = 18; }
       doc.text(e.exercise, 18, y); y += 4.5;
-      const setsStr = (e.sets||[]).map((s,i) => `S${i+1}: ${s.reps||'-'}x${s.weight||'-'}kg`).join('  ');
+      const setsStr = (e.sets||[]).map((s,i) => s.type==='duration' ? `S${i+1}: ${s.duration||'-'}` : `S${i+1}: ${s.reps||'-'}x${s.weight||'-'}kg`).join('  ');
       const setsSplit = doc.splitTextToSize(setsStr, 168);
       doc.setTextColor(80); doc.text(setsSplit, 20, y); doc.setTextColor(0); y += setsSplit.length * 4;
       if (e.notes) { const ns = doc.splitTextToSize('Note: ' + e.notes, 168); doc.setTextColor(120); doc.text(ns, 20, y); doc.setTextColor(0); y += ns.length * 4; }
