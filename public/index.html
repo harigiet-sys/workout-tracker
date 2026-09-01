@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Workout Tracker</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:#F4F1EA; color:#2C2C2A; padding-bottom:40px; }
+  header { background:#1D9E75; color:#fff; padding:20px 16px 16px; position:sticky; top:0; z-index:10; }
+  header h1 { margin:0; font-size:20px; font-weight:600; }
+  header p { margin:4px 0 0; font-size:13px; opacity:.9; }
+  .tabs { display:flex; background:#fff; border-bottom:1px solid #E0DED4; position:sticky; top:68px; z-index:9; }
+  .tab { flex:1; text-align:center; padding:12px 4px; font-size:13px; font-weight:500; color:#888780; border-bottom:2px solid transparent; }
+  .tab.active { color:#1D9E75; border-bottom-color:#1D9E75; }
+  .page { padding:16px; display:none; max-width:480px; margin:0 auto; }
+  .page.active { display:block; }
+  .card { background:#fff; border-radius:12px; padding:16px; margin-bottom:14px; box-shadow:0 1px 3px rgba(0,0,0,.06); }
+  label { font-size:12px; font-weight:600; color:#5F5E5A; display:block; margin:10px 0 4px; }
+  label:first-child { margin-top:0; }
+  input, select, textarea { width:100%; padding:10px; border:1px solid #D3D1C7; border-radius:8px; font-size:15px; font-family:inherit; background:#FAFAF7; }
+  textarea { resize:vertical; min-height:50px; }
+  button.primary { width:100%; padding:13px; background:#1D9E75; color:#fff; border:none; border-radius:8px; font-size:15px; font-weight:600; margin-top:14px; }
+  button.secondary { width:100%; padding:11px; background:transparent; color:#1D9E75; border:1px solid #1D9E75; border-radius:8px; font-size:14px; font-weight:600; margin-top:8px; }
+  .set-row { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+  .set-row .set-num { font-size:12px; color:#888780; width:18px; flex-shrink:0; }
+  .set-row input { flex:1; }
+  .set-row .set-del { flex:0 0 auto; background:none; border:none; color:#D85A30; font-size:18px; padding:0 4px; }
+  .entry { border-bottom:1px solid #EEEDE6; padding:10px 0; }
+  .entry:last-child { border-bottom:none; }
+  .entry-top { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+  .entry-name { font-weight:600; font-size:14px; }
+  .entry-meta { font-size:12px; color:#888780; margin-top:2px; }
+  .entry-actions { display:flex; gap:4px; flex-shrink:0; }
+  .entry-actions button { background:none; border:none; font-size:12px; padding:4px 6px; }
+  .edit-btn { color:#1D9E75; }
+  .del-btn { color:#D85A30; }
+  .day-group { margin-bottom:16px; }
+  .day-title { font-size:13px; font-weight:700; color:#1D9E75; text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px; }
+  .empty { text-align:center; color:#888780; padding:40px 20px; font-size:14px; }
+  .group-title { font-size:14px; font-weight:700; color:#2C2C2A; margin:16px 0 8px; }
+  .group-title:first-child { margin-top:0; }
+  .tile-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .tile { background:#fff; border-radius:10px; padding:10px; box-shadow:0 1px 3px rgba(0,0,0,.06); }
+  .tile-name { font-size:12px; font-weight:600; margin-bottom:4px; }
+  .tile-stats { font-size:11px; color:#888780; margin-top:4px; }
+  .lastcard { background:#EAF3DE; border-radius:8px; padding:10px 12px; margin-top:10px; font-size:12px; }
+  .lastcard-title { font-weight:700; color:#3B6D11; margin-bottom:4px; }
+  .filter-row { display:flex; gap:8px; margin-bottom:12px; }
+  .status { font-size:13px; color:#1D9E75; text-align:center; margin-top:10px; min-height:16px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Workout tracker</h1>
+  <p>Log sets, track progress, export a PDF report</p>
+</header>
+
+<div class="tabs">
+  <div class="tab active" data-tab="log">Log</div>
+  <div class="tab" data-tab="history">History</div>
+  <div class="tab" data-tab="progress">Progress</div>
+  <div class="tab" data-tab="report">Report</div>
+</div>
+
+<div class="page active" id="page-log">
+  <div class="card">
+    <label>Date</label>
+    <input type="date" id="f-date">
+    <label>Body part</label>
+    <select id="f-bodypart"></select>
+    <label>Exercise</label>
+    <select id="f-exercise-select"></select>
+    <input type="text" id="f-exercise-custom" placeholder="Type exercise name" style="display:none;margin-top:8px;">
+    <div class="lastcard" id="lastcard" style="display:none;"></div>
+    <label>Sets</label>
+    <div id="sets-list"></div>
+    <button class="secondary" type="button" id="btn-add-set">+ Add set</button>
+    <label>Notes</label>
+    <textarea id="f-notes" placeholder="How it felt, form cues, etc."></textarea>
+    <button class="primary" id="btn-add">Add entry</button>
+    <button class="secondary" id="btn-cancel-edit" style="display:none;">Cancel edit</button>
+    <div class="status" id="add-status"></div>
+  </div>
+</div>
+
+<div class="page" id="page-history">
+  <div class="filter-row">
+    <select id="filter-bodypart"><option value="">All body parts</option></select>
+    <select id="sort-order"><option value="desc">Newest first</option><option value="asc">Oldest first</option></select>
+  </div>
+  <div id="history-list"></div>
+</div>
+
+<div class="page" id="page-progress"><div id="progress-tiles"></div></div>
+
+<div class="page" id="page-report">
+  <div class="card">
+    <label>From</label><input type="date" id="r-from">
+    <label>To</label><input type="date" id="r-to">
+    <label>Weekly summary / notes</label>
+    <textarea id="r-notes" placeholder="How the week went, focus areas, next steps..."></textarea>
+    <button class="primary" id="btn-pdf">Generate PDF report</button>
+    <div class="status" id="pdf-status"></div>
+  </div>
+</div>
+
+<script>
+let entries = [];
+let editingId = null;
+const EXERCISE_PLAN = {
+  Push: ['Bench press','Overhead press','Incline dumbbell press','Chest fly','Tricep pushdown','Lateral raise','Dips'],
+  Pull: ['Deadlift','Pull-up','Barbell row','Lat pulldown','Seated cable row','Bicep curl','Face pull'],
+  Legs: ['Squat','Leg press','Romanian deadlift','Leg extension','Leg curl','Calf raise','Lunges'],
+  Cardio: ['Running','Cycling','Rowing','Stair climber','Jump rope'],
+  Other: []
+};
+const COLORS = ['#1D9E75','#378ADD','#D85A30','#D4537E','#7F77DD','#BA7517'];
+
+async function api(path, opts) {
+  const res = await fetch('/api' + path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts
+  });
+  if (!res.ok) throw new Error('API error');
+  return res.json();
+}
+
+async function loadEntries() {
+  entries = await api('/entries');
+  populateFilterBodypart();
+  renderHistory();
+  applyLastEntryDefaults();
+}
+
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('page-' + tab.dataset.tab).classList.add('active');
+    if (tab.dataset.tab === 'progress') renderProgressTiles();
+  });
+});
+
+function populateBodypartSelect() {
+  const sel = document.getElementById('f-bodypart');
+  sel.innerHTML = Object.keys(EXERCISE_PLAN).map(bp => `<option value="${bp}">${bp}</option>`).join('');
+  sel.onchange = () => { populateExerciseDropdown(); updateLastCard(); };
+}
+function populateExerciseDropdown(preselect) {
+  const bp = document.getElementById('f-bodypart').value;
+  const list = EXERCISE_PLAN[bp] || [];
+  const sel = document.getElementById('f-exercise-select');
+  const custom = document.getElementById('f-exercise-custom');
+  sel.innerHTML = list.map(ex => `<option value="${ex}">${ex}</option>`).join('') + '<option value="__custom__">Other / custom exercise</option>';
+  sel.onchange = () => {
+    if (sel.value === '__custom__') { custom.style.display='block'; custom.value=''; custom.focus(); }
+    else custom.style.display='none';
+    updateLastCard();
+  };
+  if (preselect) {
+    if (list.includes(preselect)) { sel.value = preselect; custom.style.display='none'; }
+    else { sel.value = '__custom__'; custom.style.display='block'; custom.value = preselect; }
+  } else custom.style.display='none';
+  updateLastCard();
+}
+function currentExerciseName() {
+  const sel = document.getElementById('f-exercise-select').value;
+  const custom = document.getElementById('f-exercise-custom').value.trim();
+  return sel === '__custom__' ? custom : sel;
+}
+function updateLastCard() {
+  const card = document.getElementById('lastcard');
+  const ex = currentExerciseName();
+  if (!ex) { card.style.display='none'; return; }
+  const prior = entries.filter(e => e.exercise === ex && e.id !== editingId).sort((a,b) => b.date.localeCompare(a.date));
+  if (prior.length === 0) { card.style.display='none'; return; }
+  const last = prior[0];
+  const setsStr = (last.sets||[]).map((s,i) => `S${i+1}: ${s.reps||'-'}×${s.weight||'-'}kg`).join('  ');
+  card.innerHTML = `<div class="lastcard-title">Last time (${last.date})</div>${escapeHtml(setsStr)}`;
+  card.style.display = 'block';
+}
+function addSetRow(reps, weight) {
+  const wrap = document.getElementById('sets-list');
+  const row = document.createElement('div');
+  row.className = 'set-row';
+  row.innerHTML = `<span class="set-num"></span><input type="number" class="set-reps" min="1" placeholder="Reps" value="${reps??''}"><input type="number" class="set-weight" min="0" step="0.5" placeholder="Weight (kg)" value="${weight??''}"><button type="button" class="set-del">&times;</button>`;
+  wrap.appendChild(row);
+  row.querySelector('.set-del').addEventListener('click', () => { row.remove(); renumberSets(); });
+  renumberSets();
+}
+function renumberSets() {
+  document.querySelectorAll('#sets-list .set-row').forEach((row,i) => row.querySelector('.set-num').textContent = (i+1)+'.');
+}
+document.getElementById('btn-add-set').addEventListener('click', () => addSetRow());
+function escapeHtml(str) { const d = document.createElement('div'); d.textContent = str; return d.innerHTML; }
+
+populateBodypartSelect(); populateExerciseDropdown(); addSetRow();
+
+function applyLastEntryDefaults() {
+  document.getElementById('f-date').value = new Date().toISOString().slice(0,10);
+  if (entries.length === 0) return;
+  const last = entries.slice().sort((a,b) => b.date.localeCompare(a.date))[0];
+  document.getElementById('f-bodypart').value = last.bodypart;
+  populateExerciseDropdown();
+}
+function resetForm() {
+  editingId = null;
+  document.getElementById('f-notes').value = '';
+  document.getElementById('sets-list').innerHTML = '';
+  addSetRow();
+  document.getElementById('btn-add').textContent = 'Add entry';
+  document.getElementById('btn-cancel-edit').style.display = 'none';
+  applyLastEntryDefaults();
+}
+document.getElementById('btn-cancel-edit').addEventListener('click', resetForm);
+
+function startEdit(id) {
+  const e = entries.find(x => x.id === id);
+  if (!e) return;
+  editingId = id;
+  document.getElementById('f-date').value = e.date;
+  document.getElementById('f-bodypart').value = e.bodypart;
+  populateExerciseDropdown(e.exercise);
+  document.getElementById('f-notes').value = e.notes || '';
+  document.getElementById('sets-list').innerHTML = '';
+  (e.sets||[]).forEach(s => addSetRow(s.reps, s.weight));
+  if ((e.sets||[]).length===0) addSetRow();
+  document.getElementById('btn-add').textContent = 'Update entry';
+  document.getElementById('btn-cancel-edit').style.display = 'block';
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelector('.tab[data-tab="log"]').classList.add('active');
+  document.getElementById('page-log').classList.add('active');
+}
+
+document.getElementById('btn-add').addEventListener('click', async () => {
+  const date = document.getElementById('f-date').value;
+  const bodypart = document.getElementById('f-bodypart').value;
+  const exercise = currentExerciseName();
+  const notes = document.getElementById('f-notes').value.trim();
+  const statusEl = document.getElementById('add-status');
+  const sets = [];
+  document.querySelectorAll('#sets-list .set-row').forEach(row => {
+    const reps = row.querySelector('.set-reps').value;
+    const weight = row.querySelector('.set-weight').value;
+    if (reps || weight) sets.push({ reps: reps?Number(reps):null, weight: weight?Number(weight):null });
+  });
+  if (!date || !exercise) { statusEl.style.color='#D85A30'; statusEl.textContent='Enter a date and exercise name.'; return; }
+  if (sets.length === 0) { statusEl.style.color='#D85A30'; statusEl.textContent='Add at least one set.'; return; }
+
+  try {
+    if (editingId) {
+      await api('/entries/' + editingId, { method: 'PUT', body: JSON.stringify({ date, bodypart, exercise, sets, notes }) });
+      statusEl.style.color = '#1D9E75'; statusEl.textContent = 'Entry updated.';
+    } else {
+      await api('/entries', { method: 'POST', body: JSON.stringify({ id: Date.now().toString(), date, bodypart, exercise, sets, notes }) });
+      statusEl.style.color = '#1D9E75'; statusEl.textContent = 'Entry added.';
+    }
+    entries = await api('/entries');
+    resetForm();
+    populateFilterBodypart();
+    setTimeout(() => statusEl.textContent = '', 1500);
+    renderHistory();
+  } catch (err) {
+    statusEl.style.color = '#D85A30'; statusEl.textContent = 'Save failed — check connection.';
+  }
+});
+
+function populateFilterBodypart() {
+  const sel = document.getElementById('filter-bodypart');
+  const prev = sel.value;
+  const parts = [...new Set(entries.map(e => e.bodypart))].sort();
+  sel.innerHTML = '<option value="">All body parts</option>' + parts.map(p => `<option value="${p}">${p}</option>`).join('');
+  sel.value = parts.includes(prev) ? prev : '';
+  sel.onchange = renderHistory;
+}
+document.getElementById('sort-order').addEventListener('change', renderHistory);
+
+function renderHistory() {
+  const list = document.getElementById('history-list');
+  const filterBp = document.getElementById('filter-bodypart').value;
+  const order = document.getElementById('sort-order').value;
+  let filtered = entries.filter(e => !filterBp || e.bodypart === filterBp);
+  if (filtered.length === 0) { list.innerHTML = '<div class="empty">No workouts match this filter.</div>'; return; }
+  const byDate = {};
+  filtered.forEach(e => (byDate[e.date] = byDate[e.date] || []).push(e));
+  let dates = Object.keys(byDate).sort();
+  if (order === 'desc') dates.reverse();
+  let html = '';
+  dates.forEach(date => {
+    html += `<div class="card day-group"><div class="day-title">${date}</div>`;
+    byDate[date].forEach(e => {
+      const setsStr = (e.sets||[]).map((s,i) => `S${i+1}: ${s.reps||'-'}×${s.weight||'-'}kg`).join('  ');
+      html += `<div class="entry"><div class="entry-top"><div><div class="entry-name">${escapeHtml(e.exercise)}</div><div class="entry-meta">${e.bodypart} · ${(e.sets||[]).length} sets</div><div class="entry-meta">${escapeHtml(setsStr)}</div></div><div class="entry-actions"><button class="edit-btn" data-id="${e.id}">Edit</button><button class="del-btn" data-id="${e.id}">Delete</button></div></div>${e.notes ? `<div class="entry-meta" style="margin-top:4px;">${escapeHtml(e.notes)}</div>` : ''}</div>`;
+    });
+    html += '</div>';
+  });
+  list.innerHTML = html;
+  list.querySelectorAll('.edit-btn').forEach(btn => btn.addEventListener('click', () => startEdit(btn.dataset.id)));
+  list.querySelectorAll('.del-btn').forEach(btn => btn.addEventListener('click', async () => {
+    await api('/entries/' + btn.dataset.id, { method: 'DELETE' });
+    entries = await api('/entries');
+    populateFilterBodypart();
+    renderHistory();
+  }));
+}
+
+let tileCharts = [];
+function renderProgressTiles() {
+  tileCharts.forEach(c => c.destroy());
+  tileCharts = [];
+  const container = document.getElementById('progress-tiles');
+  if (entries.length === 0) { container.innerHTML = '<div class="empty">No workouts logged yet.</div>'; return; }
+  const byBodypart = {};
+  entries.forEach(e => {
+    if (!(e.sets||[]).some(s => s.weight)) return;
+    (byBodypart[e.bodypart] = byBodypart[e.bodypart] || {});
+    (byBodypart[e.bodypart][e.exercise] = byBodypart[e.bodypart][e.exercise] || []).push(e);
+  });
+  let html = '';
+  const groupOrder = Object.keys(EXERCISE_PLAN).filter(bp => byBodypart[bp]);
+  groupOrder.forEach(bp => {
+    html += `<div class="group-title">${bp}</div><div class="tile-grid">`;
+    Object.keys(byBodypart[bp]).forEach((ex, i) => {
+      const tileId = 'tile-' + bp.replace(/\s/g,'') + '-' + i;
+      html += `<div class="tile"><div class="tile-name">${escapeHtml(ex)}</div><canvas id="${tileId}" height="90"></canvas><div class="tile-stats" id="${tileId}-stats"></div></div>`;
+    });
+    html += '</div>';
+  });
+  container.innerHTML = html;
+  let colorIdx = 0;
+  groupOrder.forEach(bp => {
+    Object.keys(byBodypart[bp]).forEach((ex, i) => {
+      const tileId = 'tile-' + bp.replace(/\s/g,'') + '-' + i;
+      const data = byBodypart[bp][ex].map(e => ({date: e.date, maxWeight: Math.max(...e.sets.map(s => s.weight||0))})).sort((a,b) => a.date.localeCompare(b.date));
+      const color = COLORS[colorIdx % COLORS.length]; colorIdx++;
+      const ctx = document.getElementById(tileId).getContext('2d');
+      const chart = new Chart(ctx, { type:'bar', data:{ labels: data.map(d=>d.date.slice(5)), datasets:[{ data: data.map(d=>d.maxWeight), backgroundColor: color, borderRadius: 3 }] }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{x:{ticks:{font:{size:9}}}, y:{display:false, beginAtZero:true}} } });
+      tileCharts.push(chart);
+      const maxW = Math.max(...data.map(d=>d.maxWeight));
+      const change = data[data.length-1].maxWeight - data[0].maxWeight;
+      document.getElementById(tileId+'-stats').textContent = `Max ${maxW}kg · ${change>=0?'+':''}${change}kg since first`;
+    });
+  });
+}
+
+document.getElementById('r-to').value = new Date().toISOString().slice(0,10);
+document.getElementById('r-from').value = new Date(Date.now()-7*24*60*60*1000).toISOString().slice(0,10);
+
+document.getElementById('btn-pdf').addEventListener('click', async () => {
+  const from = document.getElementById('r-from').value;
+  const to = document.getElementById('r-to').value;
+  const notes = document.getElementById('r-notes').value.trim();
+  const statusEl = document.getElementById('pdf-status');
+  if (!from || !to) { statusEl.style.color='#D85A30'; statusEl.textContent='Pick a from and to date first.'; return; }
+  const filtered = entries.filter(e => e.date >= from && e.date <= to).sort((a,b) => a.date.localeCompare(b.date));
+  if (filtered.length === 0) { statusEl.style.color='#D85A30'; statusEl.textContent='No entries in that date range.'; return; }
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  let y = 18;
+  doc.setFontSize(16); doc.text('Workout report', 14, y); y += 7;
+  doc.setFontSize(10); doc.setTextColor(100); doc.text(`${from} to ${to}`, 14, y); y += 10;
+
+  const totalSessions = new Set(filtered.map(e => e.date)).size;
+  const totalSets = filtered.reduce((s,e) => s + (e.sets||[]).length, 0);
+  const exerciseCount = new Set(filtered.map(e => e.exercise)).size;
+  doc.setTextColor(0); doc.setFontSize(11);
+  doc.text(`Sessions: ${totalSessions}    Total sets: ${totalSets}    Exercises: ${exerciseCount}`, 14, y); y += 10;
+
+  if (notes) {
+    doc.setFontSize(12); doc.text('Weekly summary', 14, y); y += 6;
+    doc.setFontSize(10); const split = doc.splitTextToSize(notes, 180); doc.text(split, 14, y); y += split.length * 5 + 6;
+  }
+
+  const freq = {}; filtered.forEach(e => freq[e.exercise] = (freq[e.exercise]||0)+1);
+  const topExercise = Object.keys(freq).sort((a,b) => freq[b]-freq[a])[0];
+  const topData = filtered.filter(e => e.exercise === topExercise && (e.sets||[]).some(s => s.weight)).map(e => ({date: e.date, maxWeight: Math.max(...e.sets.map(s => s.weight||0))}));
+
+  if (topData.length > 1) {
+    const canvas = document.createElement('canvas'); canvas.width = 500; canvas.height = 250;
+    const tmpChart = new Chart(canvas.getContext('2d'), { type:'bar', data:{ labels: topData.map(e=>e.date), datasets:[{ label: topExercise, data: topData.map(e=>e.maxWeight), backgroundColor:'#1D9E75' }] }, options:{ responsive:false, animation:false, plugins:{legend:{display:true}} } });
+    await new Promise(r => setTimeout(r, 300));
+    const imgData = canvas.toDataURL('image/png');
+    doc.setFontSize(12); doc.text(`Progress: ${topExercise}`, 14, y); y += 5;
+    doc.addImage(imgData, 'PNG', 14, y, 180, 90); y += 96;
+    tmpChart.destroy();
+  }
+
+  if (y > 260) { doc.addPage(); y = 18; }
+  doc.setFontSize(12); doc.text('Workout log', 14, y); y += 7;
+  const byDate = {}; filtered.forEach(e => (byDate[e.date] = byDate[e.date] || []).push(e));
+  doc.setFontSize(9);
+  Object.keys(byDate).forEach(date => {
+    if (y > 275) { doc.addPage(); y = 18; }
+    doc.setFont(undefined, 'bold'); doc.text(`${date} (${byDate[date][0].bodypart})`, 14, y); doc.setFont(undefined, 'normal'); y += 5;
+    byDate[date].forEach(e => {
+      if (y > 280) { doc.addPage(); y = 18; }
+      doc.text(e.exercise, 18, y); y += 4.5;
+      const setsStr = (e.sets||[]).map((s,i) => `S${i+1}: ${s.reps||'-'}x${s.weight||'-'}kg`).join('  ');
+      const setsSplit = doc.splitTextToSize(setsStr, 168);
+      doc.setTextColor(80); doc.text(setsSplit, 20, y); doc.setTextColor(0); y += setsSplit.length * 4;
+      if (e.notes) { const ns = doc.splitTextToSize('Note: ' + e.notes, 168); doc.setTextColor(120); doc.text(ns, 20, y); doc.setTextColor(0); y += ns.length * 4; }
+    });
+    y += 3;
+  });
+
+  doc.save(`workout-report-${from}_to_${to}.pdf`);
+  statusEl.style.color = '#1D9E75'; statusEl.textContent = 'PDF downloaded.';
+  setTimeout(() => statusEl.textContent = '', 2500);
+});
+
+loadEntries();
+</script>
+</body>
+</html>
